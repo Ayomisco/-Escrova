@@ -42,20 +42,32 @@ CUSD_ABI = [
     {"name": "approve", "type": "function", "inputs": [{"name": "spender", "type": "address"}, {"name": "amount", "type": "uint256"}], "outputs": [{"type": "bool"}], "stateMutability": "nonpayable"},
 ]
 
-vault = w3.eth.contract(
-    address=Web3.to_checksum_address(ESCROVA_CONTRACT_ADDRESS),
-    abi=VAULT_ABI
-)
-cusd = w3.eth.contract(
-    address=Web3.to_checksum_address(CUSD_ADDRESS),
-    abi=CUSD_ABI
-)
+# Initialize contracts — skip if placeholder address
+vault = None
+cusd = None
+
+try:
+    if ESCROVA_CONTRACT_ADDRESS and not ESCROVA_CONTRACT_ADDRESS.startswith("0x["):
+        vault = w3.eth.contract(
+            address=Web3.to_checksum_address(ESCROVA_CONTRACT_ADDRESS),
+            abi=VAULT_ABI
+        )
+    if CUSD_ADDRESS and not CUSD_ADDRESS.startswith("0x["):
+        cusd = w3.eth.contract(
+            address=Web3.to_checksum_address(CUSD_ADDRESS),
+            abi=CUSD_ABI
+        )
+except ValueError as e:
+    print(f"⚠️  Warning: Could not initialize contracts: {e}")
+    print("   Update ESCROVA_CONTRACT_ADDRESS in .env with real address")
 
 STATUS_NAMES = {0: "OPEN", 1: "FUNDED", 2: "COMPLETED", 3: "DISPUTED", 4: "RESOLVED", 5: "REFUNDED"}
 
 
 def get_all_escrows() -> list[dict]:
     """Read all escrows from the contract."""
+    if not vault:
+        return []
     count = vault.functions.escrowCount().call()
     escrows = []
     for i in range(1, count + 1):
@@ -69,57 +81,37 @@ def get_all_escrows() -> list[dict]:
                 "amount_cusd": float(w3.from_wei(e[5], "ether")),  # cUSD = 18 decimals
                 "deadline": e[7],
                 "criteria": e[8],
-                "delivery_hash": e[9],
+                "deliveryHash": e[9],
                 "status": STATUS_NAMES.get(e[10], "UNKNOWN"),
-                "status_int": e[10],
-                "created_at": e[11],
+                "createdAt": e[11],
             })
-        except Exception as ex:
-            print(f"Error reading escrow {i}: {ex}")
+        except Exception as err:
+            print(f"Error reading escrow {i}: {err}")
     return escrows
 
 
-def get_disputed_escrows() -> list[dict]:
-    """Return only DISPUTED escrows — the agent needs to act on these."""
-    return [e for e in get_all_escrows() if e["status"] == "DISPUTED"]
-
-
-def get_overdue_escrows() -> list[dict]:
-    """Return FUNDED escrows past their deadline with no delivery."""
-    import time
-    now = int(time.time())
-    return [
-        e for e in get_all_escrows()
-        if e["status"] == "FUNDED"
-        and e["deadline"] < now
-        and not e["delivery_hash"]
-    ]
-
-
-def resolve_dispute_onchain(escrow_id: int, seller_wins: bool, reasoning: str) -> str:
-    """
-    Call resolveDispute on EscrovaVault. Only callable by the arbiter (this agent).
-    Returns transaction hash.
-    """
-    nonce = w3.eth.get_transaction_count(agent.address)
-    tx = vault.functions.resolveDispute(
-        escrow_id, seller_wins, reasoning
-    ).build_transaction({
-        "from": agent.address,
-        "nonce": nonce,
-        "gas": 300000,
-        "gasPrice": w3.eth.gas_price,
-        "chainId": w3.eth.chain_id,
-    })
-    signed = agent.sign_transaction(tx)
-    tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-    receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
-    if receipt.status != 1:
-        raise Exception(f"Transaction failed: {tx_hash.hex()}")
-    return tx_hash.hex()
-
-
-def agent_cusd_balance() -> float:
-    """Check agent's cUSD balance (1% fees accumulate here)."""
-    balance_wei = cusd.functions.balanceOf(agent.address).call()
-    return float(w3.from_wei(balance_wei, "ether"))
+def resolve_dispute(escrow_id: int, seller_wins: bool, reasoning: str) -> bool:
+    """Resolve a dispute and store reasoning on-chain."""
+    if not vault:
+        print("❌ Vault not initialized. Deploy contract first.")
+        return False
+    
+    try:
+        tx = vault.functions.resolveDispute(
+            escrow_id,
+            seller_wins,
+            reasoning
+        ).build_transaction({
+            "from": AGENT_WALLET_ADDRESS,
+            "nonce": w3.eth.get_transaction_count(AGENT_WALLET_ADDRESS),
+            "gas": 500_000,
+            "gasPrice": w3.eth.gas_price,
+        })
+        
+        signed = w3.eth.account.sign_transaction(tx, AGENT_PRIVATE_KEY)
+        tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
+        print(f"✅ Dispute resolved: {tx_hash.hex()}")
+        return True
+    except Exception as e:
+        print(f"❌ Error resolving dispute: {e}")
+        return False
