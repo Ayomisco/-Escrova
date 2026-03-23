@@ -1,9 +1,43 @@
+# Environment
 .env
+.env.local
+.env.*.local
+
+# Dependencies
 node_modules/
 __pycache__/
-*.pyc
-out/
-cache/
-.next/
-.vercel/
+*.egg-info/
+.venv/
 venv/
+
+# Build outputs
+.next/
+build/
+dist/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+
+# Sensitive documentation with credentials
+docs/
+
+# Vercel
+.vercel
+
+# Python
+env/
+.Python
+pip-log.txt
+pip-delete-this-directory.txt

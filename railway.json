@@ -1,7 +1,10 @@
 {
-  "build": { "builder": "nixpacks" },
+  "build": {
+    "builder": "dockerfile",
+    "context": "./agent",
+    "dockerfile": "./agent/Dockerfile"
+  },
   "deploy": {
-    "startCommand": "cd agent && pip install -r requirements.txt && python agent.py",
     "restartPolicyType": "always"
   }
 }
